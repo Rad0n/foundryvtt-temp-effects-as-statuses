@@ -3,7 +3,12 @@
     "settings": {
       "toggle-delete": {
         "name": "Always delete instead of disable",
-        "hint": "Instead of disabling some effects and deleting others, always delete a temporary effect toggled from the status menu."
+        "hint": "Instead of disabling some effects and deleting others, always delete a temporary effect toggled from the status menu.",
+        "options": {
+          "default": "Default (Delete if status-linked)",
+          "always-delete": "Always Delete",
+          "always-keep": "Always Keep (Disable)"
+        }
       }
     }
   }

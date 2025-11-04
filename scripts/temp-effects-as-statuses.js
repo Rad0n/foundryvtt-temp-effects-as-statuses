@@ -4,7 +4,13 @@ class TempEffectsAsStatuses {
 
   static SETTINGS = {
     toggleDelete: 'toggle-delete',
-  }
+  };
+
+  static TOGGLE_MODES = {
+    ALWAYS_DELETE: "always-delete",
+    ALWAYS_KEEP: "always-keep",
+    DEFAULT: "default",
+  };
 
   static log(...args) {
     if (game.modules.get('_dev-mode')?.api?.getPackageDebugValue(this.MODULE_NAME)) {
@@ -18,9 +24,14 @@ class TempEffectsAsStatuses {
       hint: `${this.MODULE_NAME}.settings.${this.SETTINGS.toggleDelete}.hint`,
       config: true,
       scope: 'world',
-      default: false,
-      type: Boolean,
-    })
+      default: this.TOGGLE_MODES.DEFAULT,
+      type: String,
+      choices: {
+        [this.TOGGLE_MODES.DEFAULT]: `${this.MODULE_NAME}.settings.${this.SETTINGS.toggleDelete}.options.${this.TOGGLE_MODES.DEFAULT}`,
+        [this.TOGGLE_MODES.ALWAYS_DELETE]: `${this.MODULE_NAME}.settings.${this.SETTINGS.toggleDelete}.options.${this.TOGGLE_MODES.ALWAYS_DELETE}`,
+        [this.TOGGLE_MODES.ALWAYS_KEEP]: `${this.MODULE_NAME}.settings.${this.SETTINGS.toggleDelete}.options.${this.TOGGLE_MODES.ALWAYS_KEEP}`,
+      },
+    });
   }
 }
 
@@ -28,68 +39,77 @@ Hooks.on('init', () => {
   console.log(`${TempEffectsAsStatuses.MODULE_NAME} | Initializing ${TempEffectsAsStatuses.MODULE_TITLE}`);
   TempEffectsAsStatusesTokenHUD.init();
   TempEffectsAsStatuses.registerSettings();
-})
+});
 
 Hooks.once('devModeReady', ({ registerPackageDebugFlag }) => {
   registerPackageDebugFlag(TempEffectsAsStatuses.MODULE_NAME);
 });
 
-Hooks.on('renderTokenHUD', (tokenHudApp, html, applicationData) => {
-  if (!tokenHudApp.object) {
-    return;
-  }
-
-  const statusEffects = html.find('.status-effects');
-
-  // filter out temporary effects from status icons
-  const filteredEffects = tokenHudApp.object.actor.temporaryEffects.filter((effect) => {
-    return !CONFIG.statusEffects.some(statusEffect => statusEffect.id === effect.getFlag('core', 'statusId'))
-  });
-
-  const newEffectIcons = `
-  ${filteredEffects.map(effect => `<img class="effect-control active" data-effect-uuid="${effect.uuid}" src="${effect.icon}" title="${effect.label}" data-status-id="${effect.uuid}" />`).join('')
-    }
-  `
-
-  TempEffectsAsStatuses.log(filteredEffects, newEffectIcons)
-
-  statusEffects.append(newEffectIcons);
-});
-
 class TempEffectsAsStatusesTokenHUD {
   static init() {
-    libWrapper.register(TempEffectsAsStatuses.MODULE_NAME, 'TokenHUD.prototype._onToggleEffect', TempEffectsAsStatusesTokenHUD.patchToggleEffect, "MIXED");
+    Hooks.on('renderTokenHUD', this.onRenderHUD.bind(this));
   }
 
-  static async patchToggleEffect(wrapped, event, config) {
-    event.preventDefault();
-    event.stopPropagation();
-    const img = event.currentTarget;
+  static onRenderHUD(app, element, data) {
+    const token = app?.object;
+    if (!token?.actor) return;
 
-    if (img.dataset.effectUuid) {
-      return TempEffectsAsStatusesTokenHUD.toggleEffectByUuid(img.dataset.effectUuid);
+    const statusEffectsEl = element.querySelector('.status-effects');
+    if (!statusEffectsEl) return;
+
+    // Filter out core status effects
+    const filteredEffects = token.actor.temporaryEffects.filter(effect => {
+      return !CONFIG.statusEffects.some(statusEffect =>
+        statusEffect.img === effect.img && effect.statuses?.has(statusEffect.id)
+      );
+    });
+
+    for (const effect of filteredEffects) {
+      const img = document.createElement('img');
+      img.classList.add('effect-control', 'active');
+      img.dataset.effectUuid = effect.uuid;
+      img.src = effect.icon;
+      img.title = effect.name;
+      img.dataset.statusId = effect.uuid;
+      img.addEventListener('click', this.onClickEffect.bind(this));
+      statusEffectsEl.appendChild(img);
     }
 
-    return wrapped(event, config);
+    TempEffectsAsStatuses.log('Added temporary effects:', filteredEffects);
+  }
+
+  static async onClickEffect(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const img = event.currentTarget;
+    const uuid = img.dataset.effectUuid;
+    if (!uuid) return;
+
+    return await this.toggleEffectByUuid(uuid);
+  }
+
+  static checkDeleteEffect(effect) {
+    const toggleMode = game.settings.get(
+      TempEffectsAsStatuses.MODULE_NAME,
+      TempEffectsAsStatuses.SETTINGS.toggleDelete
+    );
+    return TempEffectsAsStatuses.TOGGLE_MODES.ALWAYS_KEEP !== toggleMode && (
+      +effect.statuses?.size > 0
+      || TempEffectsAsStatuses.TOGGLE_MODES.ALWAYS_DELETE === toggleMode
+    );
   }
 
   static async toggleEffectByUuid(effectUuid) {
     const effect = fromUuidSync(effectUuid);
-    const alwaysDelete = game.settings.get(TempEffectsAsStatuses.MODULE_NAME, TempEffectsAsStatuses.SETTINGS.toggleDelete);
+    if (!effect) return false;
 
-    // nuke it if it has a statusId
-    // brittle assumption
-    // provides an option to always do this
-    if (effect.getFlag('core', 'statusId') || alwaysDelete) {
-      const deleted = await effect.delete();
-      return !!deleted;
+    if (TempEffectsAsStatusesTokenHUD.checkDeleteEffect(effect)) {
+      await effect.delete();
+    } else {
+      await effect.update({ disabled: !effect.disabled });
     }
 
-    // otherwise toggle its disabled status
-    const updated = await effect.update({
-      disabled: !effect.disabled,
-    });
-
-    return !!updated;
+    return true;
   }
 }
