@@ -70,7 +70,7 @@ class TempEffectsAsStatusesTokenHUD {
       img.dataset.effectUuid = effect.uuid;
       img.src = effect.icon;
       img.title = effect.name;
-      img.dataset.statusId = effect.uuid;
+      // img.dataset.statusId = effect.uuid;
       img.addEventListener('click', this.onClickEffect.bind(this));
       statusEffectsEl.appendChild(img);
     }
